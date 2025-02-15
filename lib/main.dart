@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import 'package:fl_chart/fl_chart.dart';
 
 void main() {
   runApp(
@@ -18,10 +17,43 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '校园时间管理',
+      title: '高级时间管理',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const HomePage(),
+      routes: {
+        '/edit': (context) => const EventEditPage(),
+      },
     );
+  }
+}
+
+// 增强版事件模型
+class TimeEvent {
+  String category;
+  String name;
+  String description;
+  final DateTime startTime;
+  DateTime? endTime;
+  DateTime? pauseStart;
+  Duration pausedDuration = Duration.zero;
+
+  TimeEvent({
+    required this.category,
+    required this.startTime,
+    this.name = '',
+    this.description = '',
+  });
+
+  // 获取实际持续时间（排除暂停时间）
+  Duration get effectiveDuration {
+    final base = endTime?.difference(startTime) ?? Duration.zero;
+    return base - pausedDuration;
+  }
+
+  // 格式化时间显示
+  String get timeRange {
+    final end = endTime ?? DateTime.now();
+    return '${DateFormat('HH:mm').format(startTime)} - ${DateFormat('HH:mm').format(end)}';
   }
 }
 
@@ -30,156 +62,334 @@ class TimeTracker with ChangeNotifier {
   final List<TimeEvent> _history = [];
 
   TimeEvent? get currentEvent => _currentEvent;
-  List<TimeEvent> get history => _history;
+  List<TimeEvent> get history => _history.reversed.toList();
 
-  void startEvent(String category) {
+  // 开始新事件（带最小时间校验）
+  void startEvent({required String category, String name = '', String description = ''}) {
     if (_currentEvent != null) {
-      _currentEvent!.endTime = DateTime.now();
-      _history.add(_currentEvent!);
+      _endCurrentEvent();
     }
-    _currentEvent = TimeEvent(category: category, startTime: DateTime.now());
+
+    _currentEvent = TimeEvent(
+      category: category,
+      startTime: DateTime.now(),
+      name: name,
+      description: description,
+    );
     notifyListeners();
   }
 
+  // 暂停事件
+  void pauseEvent() {
+    if (_currentEvent != null && _currentEvent!.pauseStart == null) {
+      _currentEvent!.pauseStart = DateTime.now();
+      notifyListeners();
+    }
+  }
+
+  // 恢复事件
+  void resumeEvent() {
+    if (_currentEvent?.pauseStart != null) {
+      final pauseEnd = DateTime.now();
+      _currentEvent!.pausedDuration += pauseEnd.difference(_currentEvent!.pauseStart!);
+      _currentEvent!.pauseStart = null;
+      notifyListeners();
+    }
+  }
+
+  // 结束当前事件
   void stopCurrentEvent() {
     if (_currentEvent != null) {
       _currentEvent!.endTime = DateTime.now();
-      _history.add(_currentEvent!);
+      if (_currentEvent!.effectiveDuration.inSeconds >= 10) {
+        _history.add(_currentEvent!);
+      }
       _currentEvent = null;
       notifyListeners();
     }
   }
-}
 
-class TimeEvent {
-  final String category;
-  final DateTime startTime;
-  DateTime? endTime;
+  // 编辑事件
+  void editEvent(TimeEvent oldEvent, String newName, String newDesc) {
+    oldEvent.name = newName;
+    oldEvent.description = newDesc;
+    notifyListeners();
+  }
 
-  TimeEvent({
-    required this.category,
-    required this.startTime,
-  });
-
-  String get durationString {
-    if (endTime == null) return '进行中';
-    final duration = endTime!.difference(startTime);
-    return '${duration.inMinutes}分${duration.inSeconds % 60}秒';
+  // 私有方法：真正结束事件
+  void _endCurrentEvent() {
+    _currentEvent!.endTime = DateTime.now();
+    _history.add(_currentEvent!);
+    _currentEvent = null;
   }
 }
 
+// 主界面
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('我的时间记录')),
-      body: Column(
-        children: [
-          _buildCurrentEvent(context),
-          _buildTimeChart(context),
-          _buildHistoryList(context),
+      appBar: AppBar(
+        title: const Text('时间追踪'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () => _showHistory(context),
+          ),
         ],
       ),
-      floatingActionButton: _buildActionButtons(context),
-    );
-  }
-
-  Widget _buildCurrentEvent(BuildContext context) {
-    final event = context.watch<TimeTracker>().currentEvent;
-    return Card(
-      child: ListTile(
-        title: Text(event?.category ?? '暂无进行中的事件'),
-        subtitle: Text(event?.durationString ?? '点击下方按钮开始记录'),
+      body: Column(
+        children: [
+          _buildCurrentEventCard(context),
+          _buildControlButtons(context),
+          _buildQuickStartButtons(context),
+        ],
       ),
     );
   }
 
-  Widget _buildTimeChart(BuildContext context) {
-    final events = context.watch<TimeTracker>().history;
-    final Map<String, double> categoryDuration = {};
+  // 当前事件卡片
+  Widget _buildCurrentEventCard(BuildContext context) {
+    final event = context.watch<TimeTracker>().currentEvent;
+    final isPaused = event?.pauseStart != null;
 
-    for (var event in events) {
-      if (event.endTime != null) {
-        final duration = event.endTime!.difference(event.startTime).inSeconds;
-        categoryDuration.update(
-          event.category,
-              (value) => value + duration,
-          ifAbsent: () => duration.toDouble(),
-        );
-      }
-    }
-
-    return SizedBox(
-      height: 200,
-      child: PieChart(
-        PieChartData(
-          sections: categoryDuration.entries.map((e) {
-            return PieChartSectionData(
-              value: e.value,
-              color: _getCategoryColor(e.key),
-              title: '${e.key}\n${(e.value / 60).toStringAsFixed(1)}分钟',
-            );
-          }).toList(),
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            ListTile(
+              title: Text(event?.name.isNotEmpty == true
+                  ? event!.name
+                  : event?.category ?? '无进行中事件'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (event != null) ...[
+                    Text(event.timeRange),
+                    Text('持续时间: ${_formatDuration(event.effectiveDuration)}'),
+                    if (event.description.isNotEmpty)
+                      Text(event.description),
+                  ],
+                ],
+              ),
+            ),
+            if (isPaused)
+              const Chip(
+                label: Text('已暂停'),
+                backgroundColor: Colors.orange,
+              )
+          ],
         ),
       ),
     );
   }
 
+  // 控制按钮组
+  Widget _buildControlButtons(BuildContext context) {
+    final tracker = context.read<TimeTracker>();
+    final event = tracker.currentEvent;
+    final isPaused = event?.pauseStart != null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          if (event != null) ...[
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isPaused ? Colors.green : Colors.orange,
+              ),
+              onPressed: isPaused ? tracker.resumeEvent : tracker.pauseEvent,
+              child: Text(isPaused ? '恢复' : '暂停'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: tracker.stopCurrentEvent,
+              child: const Text('结束'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // 快速开始按钮
+  Widget _buildQuickStartButtons(BuildContext context) {
+    return Expanded(
+      child: GridView.count(
+        crossAxisCount: 2,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _buildCategoryButton(context, '学习', Colors.blue, Icons.school),
+          _buildCategoryButton(context, '休息', Colors.green, Icons.free_breakfast),
+          _buildCustomEventButton(context),
+        ],
+      ),
+    );
+  }
+
+  // 分类按钮
+  Widget _buildCategoryButton(BuildContext context, String category, Color color, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+        ),
+        icon: Icon(icon),
+        label: Text(category),
+        onPressed: () => _startQuickEvent(context, category),
+      ),
+    );
+  }
+
+  // 自定义事件按钮
+  Widget _buildCustomEventButton(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.purple,
+          foregroundColor: Colors.white,
+        ),
+        icon: const Icon(Icons.add),
+        label: const Text('自定义'),
+        onPressed: () => _showCustomEventDialog(context),
+      ),
+    );
+  }
+
+  // 显示历史记录
+  void _showHistory(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => _buildHistoryList(context),
+    );
+  }
+
+  // 历史记录列表
   Widget _buildHistoryList(BuildContext context) {
     final history = context.watch<TimeTracker>().history;
-    return Expanded(
-      child: ListView.builder(
-        itemCount: history.length,
-        itemBuilder: (context, index) {
-          final event = history.reversed.toList()[index];
-          return ListTile(
-            leading: Icon(Icons.access_time, color: _getCategoryColor(event.category)),
-            title: Text(event.category),
-            subtitle: Text(DateFormat('HH:mm').format(event.startTime)),
-            trailing: Text(event.durationString),
-          );
-        },
+
+    return ListView.builder(
+      itemCount: history.length,
+      itemBuilder: (context, index) {
+        final event = history[index];
+        return ListTile(
+          title: Text(event.name.isNotEmpty ? event.name : event.category),
+          subtitle: Text(event.timeRange),
+          trailing: Text(_formatDuration(event.effectiveDuration)),
+          onTap: () => Navigator.pushNamed(
+            context,
+            '/edit',
+            arguments: event,
+          ),
+        );
+      },
+    );
+  }
+
+  // 其他辅助方法
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    return '${hours}h ${minutes}m';
+  }
+
+  void _startQuickEvent(BuildContext context, String category) {
+    context.read<TimeTracker>().startEvent(category: category);
+  }
+
+  void _showCustomEventDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    final descController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('创建自定义事件'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: '事件名称'),
+            ),
+            TextFormField(
+              controller: descController,
+              decoration: const InputDecoration(labelText: '描述'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              context.read<TimeTracker>().startEvent(
+                category: '自定义',
+                name: nameController.text,
+                description: descController.text,
+              );
+              Navigator.pop(context);
+            },
+            child: const Text('开始'),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildActionButtons(BuildContext context) {
-    final tracker = context.read<TimeTracker>();
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        FloatingActionButton(
-          heroTag: 'study',
-          onPressed: () => tracker.startEvent('学习'),
-          backgroundColor: _getCategoryColor('学习'),
-          child: const Icon(Icons.school),
+// 事件编辑页面
+class EventEditPage extends StatelessWidget {
+  const EventEditPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final event = ModalRoute.of(context)!.settings.arguments as TimeEvent;
+    final nameController = TextEditingController(text: event.name);
+    final descController = TextEditingController(text: event.description);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('编辑事件')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            TextFormField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: '事件名称'),
+            ),
+            TextFormField(
+              controller: descController,
+              decoration: const InputDecoration(labelText: '描述'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                context.read<TimeTracker>().editEvent(
+                  event,
+                  nameController.text,
+                  descController.text,
+                );
+                Navigator.pop(context);
+              },
+              child: const Text('保存修改'),
+            ),
+          ],
         ),
-        const SizedBox(width: 10),
-        FloatingActionButton(
-          heroTag: 'rest',
-          onPressed: () => tracker.startEvent('休息'),
-          backgroundColor: _getCategoryColor('休息'),
-          child: const Icon(Icons.free_breakfast),
-        ),
-        const SizedBox(width: 10),
-        FloatingActionButton(
-          heroTag: 'stop',
-          onPressed: tracker.stopCurrentEvent,
-          child: const Icon(Icons.stop),
-        ),
-      ],
+      ),
     );
-  }
-
-  Color _getCategoryColor(String category) {
-    final colors = {
-      '学习': Colors.blue,
-      '休息': Colors.green,
-      '娱乐': Colors.orange,
-      '运动': Colors.red,
-    };
-    return colors[category] ?? Colors.grey;
   }
 }
