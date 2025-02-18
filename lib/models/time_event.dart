@@ -18,9 +18,10 @@ class TimeEvent {
   });
 
   Duration get effectiveDuration {
-    final end = endTime ?? DateTime.now();  // 关键修改
+    final end = endTime ?? DateTime.now();
     final base = end.difference(startTime);
-    return base - pausedDuration;
+    final currentPause = pauseStart != null ? DateTime.now().difference(pauseStart!) : Duration.zero;
+    return base - pausedDuration - currentPause;  // 关键修复：实时扣除当前暂停时段
   }
 
   String get timeRange {
