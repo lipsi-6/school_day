@@ -1,3 +1,4 @@
+// time_event.dart
 import 'package:intl/intl.dart';
 
 class TimeEvent {
@@ -17,7 +18,8 @@ class TimeEvent {
   });
 
   Duration get effectiveDuration {
-    final base = endTime?.difference(startTime) ?? Duration.zero;
+    final end = endTime ?? DateTime.now();  // 关键修改
+    final base = end.difference(startTime);
     return base - pausedDuration;
   }
 
