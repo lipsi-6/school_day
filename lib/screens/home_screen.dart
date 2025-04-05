@@ -35,6 +35,9 @@ class HomePage extends StatelessWidget {
   }
 
   Widget _buildQuickStartSection(BuildContext context) {
+    final tracker = context.watch<TimeTracker>();
+    final isEventOngoing = tracker.currentEvent != null; // 判断是否有事件进行中
+
     return Expanded(
       child: GridView.count(
         crossAxisCount: 2,
@@ -42,34 +45,34 @@ class HomePage extends StatelessWidget {
         children: [
           CategoryButton(
             category: '学习',
-            color: Colors.blue,
+            color: isEventOngoing ? Colors.grey : Colors.blue, // 事件进行中变灰
             icon: Icons.school,
-            onPressed: () => _startQuickEvent(context, '学习'),
+            onPressed: isEventOngoing ? null : () => _startQuickEvent(context, '学习'), // 禁用点击
           ),
           CategoryButton(
             category: '休息',
-            color: Colors.green,
+            color: isEventOngoing ? Colors.grey : Colors.green,
             icon: Icons.free_breakfast,
-            onPressed: () => _startQuickEvent(context, '休息'),
+            onPressed: isEventOngoing ? null : () => _startQuickEvent(context, '休息'),
           ),
-          _buildCustomEventButton(context),
+          _buildCustomEventButton(context, isEventOngoing),
         ],
       ),
     );
   }
 
   // 自定义事件按钮（拆分为独立组件）
-  Widget _buildCustomEventButton(BuildContext context) {
+  Widget _buildCustomEventButton(BuildContext context, bool isEventOngoing) {
     return Padding(
       padding: const EdgeInsets.all(8),
       child: ElevatedButton.icon(
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.purple,
+          backgroundColor: isEventOngoing ? Colors.grey : Colors.purple, // 事件进行中变灰
           foregroundColor: Colors.white,
         ),
         icon: const Icon(Icons.add),
         label: const Text('自定义'),
-        onPressed: () => _showCustomEventDialog(context),
+        onPressed: isEventOngoing ? null : () => _showCustomEventDialog(context), // 禁用点击
       ),
     );
   }
